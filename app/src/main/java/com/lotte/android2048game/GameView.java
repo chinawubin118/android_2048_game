@@ -29,7 +29,7 @@ public class GameView extends SurfaceView implements SurfaceHolder.Callback2 {
     private float screenHeight;//屏幕高度
     private float borderWidth;//单元格边框的宽度
     private float cellWidth;//单元格的宽度
-    private int textSize;//字体的大小
+    private float textSize;//字体的大小
 
     private Paint bgPaint;//绘制屏幕背景的paint
     private Paint cellPaint;//绘制单元格的paint
@@ -37,6 +37,7 @@ public class GameView extends SurfaceView implements SurfaceHolder.Callback2 {
 
     private Cell[][] cellArray;//存放所有的单元格
     private boolean isFirstGame;//是否是第一次进入游戏,第一次的话需要生成两个位置的随机数
+    private int score;//分数
 
     public GameView(Context context) {
         super(context);
@@ -51,6 +52,8 @@ public class GameView extends SurfaceView implements SurfaceHolder.Callback2 {
     public void initGame() {
         isFirstGame = true;
         cellArray = new Cell[4][4];
+        generateCells();//生成单元格
+        score = 0;//分数
 
         holder = getHolder();
         holder.addCallback(this);
@@ -60,6 +63,10 @@ public class GameView extends SurfaceView implements SurfaceHolder.Callback2 {
 
         cellPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
         cellPaint.setColor(Color.parseColor("#776B61"));
+        if (screenWidth != 0) {//可以认为是再次开始游戏
+            textSize = (int) (screenWidth / 15);//字体大小为屏幕宽度的1/15
+            cellPaint.setTextSize(textSize);
+        }
 
         borderPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
         borderPaint.setColor(Color.parseColor("#BBACA4"));
@@ -117,13 +124,14 @@ public class GameView extends SurfaceView implements SurfaceHolder.Callback2 {
     }
 
     //游戏是否胜利
-    private boolean isGameWin() {
+    private boolean isGameFailed() {
         int maxNum = getCurrentMaxNum();
         if (maxNum >= 2048) {//游戏胜利
-            return true;
-        }
-        if (!isHasSpace() && maxNum < 2048) {//没有空间了,并且最大值小于2048,游戏失败
             return false;
+        }
+        if (!isHasSpace() && maxNum < 2048 && !canMoveLeft() && !canMoveRight() && !canMoveUp()
+                && !canMoveDown()) {//没有空间,最大值小于2048,并且不能左右上下移动了,游戏失败
+            return true;
         }
         return false;
     }
@@ -184,17 +192,29 @@ public class GameView extends SurfaceView implements SurfaceHolder.Callback2 {
         }
     }
 
+    private void drawBottom(Canvas canvas) {
+        Paint paint = new Paint();
+        paint.setColor(Color.parseColor("#F9F9EF"));
+        canvas.drawRect(0, screenWidth, screenWidth, screenHeight, paint);
+    }
+
+    //画分数
+    private void drawScore() {
+        Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        paint.setColor(Color.GRAY);
+        paint.setTextSize(screenWidth / 15);//字体大小
+        canvas.drawText("分数:" + score, screenWidth / 15, getWidth() + cellWidth / 2, paint);
+    }
+
     @Override
     public void surfaceCreated(SurfaceHolder holder) {
         screenHeight = getHeight();
         screenWidth = getWidth();
         borderWidth = screenWidth / 40.0f;
         cellWidth = (screenWidth - borderWidth * 5.0f) / 4.0f;
-        textSize = (int) (screenWidth / 15);//字体大小为屏幕宽度的1/15
+        textSize = screenWidth / 15;//字体大小为屏幕宽度的1/15
         cellPaint.setTextSize(textSize);
         Log.i("wubin", "screenWidth = " + screenWidth + ",screenHeight = " + screenHeight);
-
-        generateCells();//生成单元格
 
         drawElements();//界面有改变,重新绘制所有元素
     }
@@ -252,9 +272,20 @@ public class GameView extends SurfaceView implements SurfaceHolder.Callback2 {
                     generateRandom();
                     drawElements();//界面有改变,重新绘制所有元素
 
-                    if (isGameWin()) {
-
-                        onGameStateChangeListener.onGameWin(this, 10000);
+                    if (null != onGameStateChangeListener) {
+                        if (isGameFailed()) {
+                            onGameStateChangeListener.onGameOver(this, score, false);
+                        } else {//游戏没有失败(可能还有空间或者没有空间但是游戏分数大于2048)
+                            if (isHasSpace()) {
+                                onGameStateChangeListener.onCellChange();
+                            } else {
+                                if (getCurrentMaxNum() >= 2048 && !canMoveLeft() && !canMoveRight() && !canMoveUp()
+                                        && !canMoveDown()) {
+                                    //没有空间了,分数达到2048,不能移动了
+                                    onGameStateChangeListener.onGameOver(this, score, true);
+                                }
+                            }
+                        }
                     }
                 }
                 break;
@@ -279,11 +310,32 @@ public class GameView extends SurfaceView implements SurfaceHolder.Callback2 {
                             //此时需要将右边的值*2放到当前位置,右边的位置设为0
                             cellArray[x][y1].setNumber("0");
                             cellArray[x][y].setNumber(rightNum * 2 + "");
+                            score += rightNum * 2;
                         }
                     }
                 }
             }
         }
+    }
+
+    private boolean canMoveLeft() {
+        for (int x = 0; x < 4; x++) {
+            for (int y = 0; y < 4; y++) {
+                for (int y1 = y + 1; y1 < 4; y1++) {//横向遍历该行的每一个数字
+                    int currNum = Integer.parseInt(cellArray[x][y].getNumber());//当前位置的数字
+                    int rightNum = Integer.parseInt(cellArray[x][y1].getNumber());//当前位置右边的数字
+                    if (rightNum > 0) {//右边位置不是0
+                        if (currNum == 0) {//当前位置是0
+                            return true;
+                        } else if (currNum == rightNum) {//右边不是0,并且当前位置和右边的数字相同,此时需要合并数字
+                            return true;
+                        }
+                    }
+                }
+            }
+        }
+
+        return false;
     }
 
     private void moveRight() {
@@ -303,11 +355,31 @@ public class GameView extends SurfaceView implements SurfaceHolder.Callback2 {
                             //此时需要将左边的值*2放到当前位置,左边的位置设为0
                             cellArray[x][y1].setNumber("0");
                             cellArray[x][y].setNumber(rightNum * 2 + "");
+                            score += rightNum * 2;
                         }
                     }
                 }
             }
         }
+    }
+
+    private boolean canMoveRight() {
+        for (int x = 0; x < 4; x++) {
+            for (int y = 3; y >= 0; y--) {
+                for (int y1 = y - 1; y1 >= 0; y1--) {//横向遍历该行的每一个数字
+                    int currNum = Integer.parseInt(cellArray[x][y].getNumber());//当前位置的数字
+                    int rightNum = Integer.parseInt(cellArray[x][y1].getNumber());//当前位置左边的数字
+                    if (rightNum > 0) {//左边位置不是0
+                        if (currNum == 0) {//当前位置是0
+                            return true;
+                        } else if (currNum == rightNum) {//左边不是0,并且当前位置和左边的数字相同,此时需要合并数字
+                            return true;
+                        }
+                    }
+                }
+            }
+        }
+        return false;
     }
 
     private void moveUp() {
@@ -327,11 +399,31 @@ public class GameView extends SurfaceView implements SurfaceHolder.Callback2 {
                             //此时需要将下边的值*2放到当前位置,下边的位置设为0
                             cellArray[x1][y].setNumber("0");
                             cellArray[x][y].setNumber(rightNum * 2 + "");
+                            score += rightNum * 2;
                         }
                     }
                 }
             }
         }
+    }
+
+    private boolean canMoveUp() {
+        for (int y = 0; y < 4; y++) {
+            for (int x = 0; x < 4; x++) {
+                for (int x1 = x + 1; x1 < 4; x1++) {//横向遍历该行的每一个数字
+                    int currNum = Integer.parseInt(cellArray[x][y].getNumber());//当前位置的数字
+                    int rightNum = Integer.parseInt(cellArray[x1][y].getNumber());//当前位置下边的数字
+                    if (rightNum > 0) {//下边位置不是0
+                        if (currNum == 0) {//当前位置是0
+                            return true;
+                        } else if (currNum == rightNum) {//下边不是0,并且当前位置和下边的数字相同,此时需要合并数字
+                            return true;
+                        }
+                    }
+                }
+            }
+        }
+        return false;
     }
 
     private void moveDown() {
@@ -351,6 +443,7 @@ public class GameView extends SurfaceView implements SurfaceHolder.Callback2 {
                             //此时需要将上边的值*2放到当前位置,上边的位置设为0
                             cellArray[x1][y].setNumber("0");
                             cellArray[x][y].setNumber(rightNum * 2 + "");
+                            score += rightNum * 2;
                         }
                     }
                 }
@@ -358,12 +451,33 @@ public class GameView extends SurfaceView implements SurfaceHolder.Callback2 {
         }
     }
 
-    private void drawElements() {
+    private boolean canMoveDown() {
+        for (int y = 0; y < 4; y++) {
+            for (int x = 3; x >= 0; x--) {
+                for (int x1 = x - 1; x1 >= 0; x1--) {//横向遍历该行的每一个数字
+                    int currNum = Integer.parseInt(cellArray[x][y].getNumber());//当前位置的数字
+                    int rightNum = Integer.parseInt(cellArray[x1][y].getNumber());//当前位置上边的数字
+                    if (rightNum > 0) {//上边位置不是0
+                        if (currNum == 0) {//当前位置是0
+                            return true;
+                        } else if (currNum == rightNum) {//上边不是0,并且当前位置和上边的数字相同,此时需要合并数字
+                            return true;
+                        }
+                    }
+                }
+            }
+        }
+        return false;
+    }
+
+    public void drawElements() {
         canvas = holder.lockCanvas();
 
         canvas.drawRect(0, 0, screenWidth, screenWidth, bgPaint);//绘制背景
         drawBoders(canvas);//绘制边框
         drawNumber(canvas);
+        drawBottom(canvas);//绘制底部的背景
+        drawScore();//绘制分数
 
         holder.unlockCanvasAndPost(canvas);
     }
@@ -374,6 +488,12 @@ public class GameView extends SurfaceView implements SurfaceHolder.Callback2 {
 //            super.run();
 //        }
 //    }
+
+
+    //返回分数
+    public int getScore() {
+        return score;
+    }
 
     private OnGameStateChangeListener onGameStateChangeListener;
 
@@ -387,6 +507,6 @@ public class GameView extends SurfaceView implements SurfaceHolder.Callback2 {
 
         void onScoreChanged(int currScore);//游戏分数改变.
 
-        void onGameWin(GameView gameView, int currScore);//游戏胜利.
+        void onGameOver(GameView gameView, int currScore, boolean isSuccess);//游戏结束(可能胜利或者失败).
     }
 }
